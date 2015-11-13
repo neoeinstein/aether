@@ -183,8 +183,6 @@ module Optics =
     /// Lens to the second item of a tuple
     let snd_ : Lens<('a * 'b),'b> =
         snd, (fun b t -> fst t, b)
-        // : Traversal2<'a * 'a, 'a>
-        // : ('o -> seq<'i>) * (('i -> 'i) -> 'o -> 'o)
 
     let both_ : Traversal'<('a * 'a), 'a> =
         (fun (f,s) -> seq { yield f; yield s }),
