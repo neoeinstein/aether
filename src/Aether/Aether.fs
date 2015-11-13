@@ -82,11 +82,11 @@ module Traversal =
     let inline sequence ((g, _) : Traversal<_,_,_,_,_>) =
         g
 
-    let inline toList ((g, _) : Traversal<_,_,_,_,_>) =
-        g >> Seq.toList
-
     let inline over ((_, s) : Traversal<_,_,_,_,_>) =
         s
+
+    let inline set (t : Traversal<_,_,_,_,_>) v =
+        over t (fun _ -> v)
 
     let inline ofLens ((g, s) : Lens<_,_>) : Traversal'<_,_> =
         g >> Seq.singleton,
@@ -187,7 +187,7 @@ module Optics =
         // : ('o -> seq<'i>) * (('i -> 'i) -> 'o -> 'o)
 
     let both_ : Traversal'<('a * 'a), 'a> =
-        (fun a -> seq { yield fst a; yield snd a }),
+        (fun (f,s) -> seq { yield f; yield s }),
         (fun f a -> f (fst a), f (snd a))
 
     [<RequireQualifiedAccess>]
@@ -220,6 +220,10 @@ module Optics =
             Array.choose (Prism.get prism) >> Seq.ofArray,
             Prism.map prism >> Array.map
 
+        let traverse (t : Traversal'<'i, 'j>) : Traversal'<'i[],'j> =
+            Seq.collect (Traversal.sequence t),
+            Traversal.over t >> Array.map
+
     [<RequireQualifiedAccess>]
     module List =
 
@@ -249,6 +253,10 @@ module Optics =
         let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i list,'j> =
             List.choose (Prism.get prism) >> Seq.ofList,
             Prism.map prism >> List.map
+
+        let traverse (t : Traversal'<'i, 'j>) : Traversal'<'i list,'j> =
+            Seq.collect (Traversal.sequence t),
+            Traversal.over t >> List.map
 
     [<RequireQualifiedAccess>]
     module Map =
@@ -281,6 +289,10 @@ module Optics =
             Map.toArray >> Seq.ofArray >> Seq.choose (fun (_,v) -> Prism.get prism v),
             fun f -> Map.map (fun _ -> Prism.map prism f)
 
+        let traverse (t : Traversal'<'i, 'j>) : Traversal'<Map<'k,'i>,'j> =
+            Map.toArray >> Seq.ofArray >> Seq.collect (fun (_,v) -> Traversal.sequence t v),
+            fun f -> Map.map (fun _ -> Traversal.over t f)
+
     [<RequireQualifiedAccess>]
     module Set =
 
@@ -291,6 +303,10 @@ module Optics =
         let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<Set<'i>,'j> =
             Set.toArray >> Seq.ofArray >> Seq.choose (Prism.get prism),
             Prism.map prism >> Set.map
+
+        let traverse (t : Traversal'<'i, 'j>) : Traversal'<Set<'i>,'j> =
+            Set.toArray >> Seq.ofArray >> Seq.collect (Traversal.sequence t),
+            Traversal.over t >> Set.map
 
     [<RequireQualifiedAccess>]
     module Option =
@@ -332,6 +348,21 @@ module Operators =
     let inline (>??>) l1 l2 =
         Compose.prismWithPrism l1 l2
 
+    let inline (>%%>) t1 t2 =
+        Compose.traversalWithTraversal t1 t2
+
+    let inline (>-%>) l t =
+        Compose.lensWithTraversal l t
+
+    let inline (>?%>) p t =
+        Compose.prismWithTraversal p t
+
+    let inline (>%->) t l =
+        Compose.traversalWithLens t l
+
+    let inline (>%?>) t p=
+        Compose.traversalWithPrism t p
+
     /// Compose a lens with an isomorphism, giving a total lens
     let inline (<-->) l i =
         Compose.lensWithIsomorphism l i
@@ -363,6 +394,9 @@ module Operators =
     let inline (^?.) (a: 'a) (l: Prism<'a,'b>) : 'b option =
         Prism.get l a
 
+    let inline (^..) (a: 'a) (t: Traversal'<'a,'b>) : 'b seq =
+        Traversal.sequence t a
+
     /// Set a value using a lens
     let inline (^=) (b: 'b) (l: Lens<'a,'b>) : 'a -> 'a =
         Lens.set l b
@@ -371,6 +405,9 @@ module Operators =
     let inline (^?=) (b: 'b) (l: Prism<'a,'b>) : 'a -> 'a =
         Prism.set l b
 
+    let inline (^%~) (b: 'b) (t: Traversal'<'a,'b>) =
+        Traversal.over t (fun _ -> b)
+
     /// Modify a value using a lens
     let inline (^%=) (f: 'b -> 'b) (l: Lens<'a,'b>) : 'a -> 'a =
         Lens.map l f
@@ -378,3 +415,7 @@ module Operators =
     /// Modify a value using a prism
     let inline (^?%=) (f: 'b -> 'b) (l: Prism<'a,'b>) : 'a -> 'a =
         Prism.map l f
+
+    let inline (^%%) (f: 'b -> 'b) (t: Traversal'<'a,'b>) =
+        Traversal.over t f
+
