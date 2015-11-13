@@ -63,6 +63,19 @@ module ``Built-in Prisms`` =
     let ``Map.key_ follows the Prism Laws`` key (outer : Map<string,obj>) inner dummy f =
         Prism.followsPrismLaws (Map.key_ key) outer inner dummy f
 
+module ``Built-in Traversals`` =
+    [<Property>]
+    let ``both_ follows the Traversal Laws`` (outer : int * int) f =
+        Traversal.followsTraversalLaws both_ id (Traversal.sequence both_ >> Seq.length) outer f
+
+    [<Property>]
+    let ``Array.each_ follows the Traversal Laws`` (outer : int[]) f =
+        Traversal.followsTraversalLaws Array.each_ id Array.length outer f
+
+    [<Property>]
+    let ``List.each_ follows the Traversal Laws`` (outer : int list) f =
+        Traversal.followsTraversalLaws List.each_ id List.length outer f
+
 module ``Built-in Isomorphisms`` =
     [<Property>]
     let ``Map.list_ follows the Weak Isomorphism Laws`` (outer : Map<string,obj>) inner dummy =

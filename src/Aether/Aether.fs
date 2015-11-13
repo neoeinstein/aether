@@ -7,11 +7,22 @@
    so an assembly *providing* lenses without also consuming them
    requires no dependency on Aether, just an implicit structuring. *)
 
-/// Lens from a -> b
-type Lens<'a,'b> = ('a -> 'b) * ('b -> 'a -> 'a)
+type Getter<'s,'a> = ('s -> 'a)
+
+type Setter<'s,'t,'a,'b> = (('a -> 'b) -> 's -> 't)
+type Setter<'s,'a> = Setter<'s,'s,'a,'a>
+
+type Setter'<'s,'t,'a> = ('a -> 's -> 't)
+type Setter'<'s,'a> = Setter'<'s,'s,'a>
+
+type Traversal<'s,'t,'a,'b> = Setter<'s,'t,'a,'b>
+type Traversal<'s,'a> = Traversal<'s,'s,'a,'a>
+
+/// Lens from s -> a
+type Lens<'s,'a> = Getter<'s,'a> * Setter'<'s,'a>
 
 /// Prism from a -> b
-type Prism<'a,'b> = ('a -> 'b option) * ('b -> 'a -> 'a)
+type Prism<'s,'a> = Getter<'s,'a option> * Setter'<'s,'a>
 
 type Traversal<'o,'q,'p,'i,'j> = ('o -> 'q) * (('i -> 'j) -> 'o -> 'p)
 
@@ -203,6 +214,9 @@ module Optics =
             Seq.collect (Traversal.sequence t),
             Traversal.over t >> Seq.map
 
+        let each_ : Traversal'<'i seq,'i> =
+            id, Seq.map
+
     [<RequireQualifiedAccess>]
     module Array =
 
@@ -221,6 +235,9 @@ module Optics =
         let traverse (t : Traversal'<'i, 'j>) : Traversal'<'i[],'j> =
             Seq.collect (Traversal.sequence t),
             Traversal.over t >> Array.map
+
+        let each_ : Traversal'<'i [],'i> =
+            Array.toSeq, Array.map
 
     [<RequireQualifiedAccess>]
     module List =
@@ -255,6 +272,9 @@ module Optics =
         let traverse (t : Traversal'<'i, 'j>) : Traversal'<'i list,'j> =
             Seq.collect (Traversal.sequence t),
             Traversal.over t >> List.map
+
+        let each_ : Traversal'<'i list,'i> =
+            List.toSeq, List.map
 
     [<RequireQualifiedAccess>]
     module Map =

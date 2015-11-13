@@ -210,3 +210,19 @@ module Properties =
             Prism.setSetOrderDependence (asPrism epi) outer inner dummy .&.
             roundtripEquality epi outer .&.
             converseRoundtripEquality epi inner
+
+    [<RequireQualifiedAccess;CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+    module Traversal =
+        let over = snd
+
+        let purity over ``pure`` v =
+            "Purity" @| lazy
+                test <@ over ``pure`` v = v @>
+
+        let lengthPreserving over length v f =
+            "Length Preserving" @| lazy
+                test <@ over f v |> length = length v @>
+
+        let inline followsTraversalLaws traversal ``pure`` length v f =
+            purity (over traversal) ``pure`` v .&.
+            lengthPreserving (over traversal) length v f
