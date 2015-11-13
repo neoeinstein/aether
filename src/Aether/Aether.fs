@@ -15,7 +15,7 @@ type Prism<'a,'b> = ('a -> 'b option) * ('b -> 'a -> 'a)
 
 type Traversal<'o,'q,'p,'i,'j> = ('o -> 'q) * (('i -> 'j) -> 'o -> 'p)
 
-type Traversal'<'o,'q,'i> = Traversal<'o,'q,'o,'i,'i>
+type Traversal'<'o,'i> = Traversal<'o,'i seq,'o,'i,'i>
 
 // Isomorphisms
 
@@ -24,6 +24,12 @@ type Isomorphism<'a,'b> = ('a -> 'b) * ('b -> 'a)
 
 /// Epimorphism of a <> b
 type Epimorphism<'a,'b> = ('a -> 'b option) * ('b -> 'a)
+
+module private Option =
+    let inline toSeq opt=
+        match opt with
+        | Some v -> Seq.singleton v
+        | None -> Seq.empty
 
 /// Functions for using lenses to get, set, and modify values on
 /// product-types, such as tuples and records.
@@ -82,12 +88,12 @@ module Traversal =
     let inline over ((_, s) : Traversal<_,_,_,_,_>) =
         s
 
-    let inline ofLens ((g, s) : Lens<_,_>) : Traversal'<_,_,_> =
+    let inline ofLens ((g, s) : Lens<_,_>) : Traversal'<_,_> =
         g >> Seq.singleton,
         (fun f a -> s (f (g a)) a)
 
-    let inline ofPrism ((g, s) : Prism<_,_>) : Traversal'<_,_,_> =
-        g >> Option.toArray >> Array.toSeq,
+    let inline ofPrism ((g, s) : Prism<_,_>) : Traversal'<_,_> =
+        g >> Option.toSeq,
         (fun f a -> Option.map f (g a) |> function | Some b -> s b a | _ -> a)
 
 /// Functions for composing lenses, prisms, and isomorphisms, each of which
@@ -140,27 +146,24 @@ module Compose =
         (fun c a -> s (t c) a)
 
     /// Compose a lens with a traversal, giving a traversal
-    let lensWithTraversal ((g, s) : Lens<'a,'b>) ((q, t) : Traversal'<'b,'d,'c>) : Traversal'<'a,'d,'c> =
+    let lensWithTraversal ((g, s) : Lens<'a,'b>) ((q, t) : Traversal'<'b,'c>) : Traversal'<'a,'c> =
         g >> q,
         (fun f a -> s (t f (g a)) a)
 
     /// Compose a prism with a traversal, giving a traversal
-    let prismWithTraversal ((g, s) : Prism<'a,'b>) ((q, t) : Traversal'<'b,'d,'c>) : Traversal'<'a,'d seq,'c> =
-        g >> Option.map q >> Option.toArray >> Array.toSeq,
+    let prismWithTraversal ((g, s) : Prism<'a,'b>) ((q, t) : Traversal'<'b,'c>) : Traversal'<'a,'c> =
+        g >> Option.toSeq >> Seq.collect q,
         (fun f a -> Option.map (t f) (g a) |> function | Some b -> s b a | None -> a)
 
     /// Compose a traversal with a traversal, giving a traversal
-    let traversalWithTraversalWithGlue ((q1, t1) : Traversal'<'a,'e,'b>) ((q2,t2) : Traversal'<'b,'d,'c>) (glue : ('b -> 'd) -> 'e -> 'd) : Traversal'<'a,'d,'c> =
-        (q1 >> glue q2),
+    let traversalWithTraversal ((q1, t1) : Traversal'<'a,'b>) ((q2,t2) : Traversal'<'b,'c>) : Traversal'<'a,'c> =
+        q1 >> Seq.collect q2,
         (fun f a -> t1 (t2 f) a)
 
-    let inline traversalWithTraversal l r =
-        traversalWithTraversalWithGlue l r Seq.collect
-
-    let traversalWithLens (t : Traversal'<'a,'e,'b>) (l : Lens<'b,'c>) : Traversal'<'a,'c seq,'c> =
+    let traversalWithLens (t : Traversal'<'a,'b>) (l : Lens<'b,'c>) : Traversal'<'a,'c> =
         traversalWithTraversal t (Traversal.ofLens l)
 
-    let traversalWithPrism (t : Traversal'<'a,'e,'b>) (p : Prism<'b,'c>) : Traversal'<'a,'c seq,'c> =
+    let traversalWithPrism (t : Traversal'<'a,'b>) (p : Prism<'b,'c>) : Traversal'<'a,'c> =
         traversalWithTraversal t (Traversal.ofPrism p)
 
 /// Various optics implemented for common types such as tuples,
@@ -183,19 +186,24 @@ module Optics =
         // : Traversal2<'a * 'a, 'a>
         // : ('o -> seq<'i>) * (('i -> 'i) -> 'o -> 'o)
 
-    let both_ : Traversal'<('a * 'a), 'a seq, 'a> =
+    let both_ : Traversal'<('a * 'a), 'a> =
         (fun a -> seq { yield fst a; yield snd a }),
         (fun f a -> f (fst a), f (snd a))
 
     [<RequireQualifiedAccess>]
     module Seq =
-        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i seq,'j seq,'j> =
+
+        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i seq,'j> =
             Seq.map (Lens.get lens),
             Lens.map lens >> Seq.map
 
-        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i seq,'j seq,'j> =
+        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i seq,'j> =
             Seq.choose (Prism.get prism),
             Prism.map prism >> Seq.map
+
+        let traverse (t : Traversal'<'i, 'j>) : Traversal'<'i seq,'j> =
+            Seq.collect (Traversal.sequence t),
+            Traversal.over t >> Seq.map
 
     [<RequireQualifiedAccess>]
     module Array =
@@ -204,12 +212,12 @@ module Optics =
         let list_ : Isomorphism<'v[], 'v list> =
             Array.toList, Array.ofList
 
-        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i[],'j[],'j> =
-            Array.map (Lens.get lens),
+        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i[],'j> =
+            Array.map (Lens.get lens) >> Seq.ofArray,
             Lens.map lens >> Array.map
 
-        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i[],'j[],'j> =
-            Array.choose (Prism.get prism),
+        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i[],'j> =
+            Array.choose (Prism.get prism) >> Seq.ofArray,
             Prism.map prism >> Array.map
 
     [<RequireQualifiedAccess>]
@@ -234,12 +242,12 @@ module Optics =
         let array_ : Isomorphism<'v list, 'v[]> =
             List.toArray, List.ofArray
 
-        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i list,'j list,'j> =
-            List.map (Lens.get lens),
+        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<'i list,'j> =
+            List.map (Lens.get lens) >> Seq.ofList,
             Lens.map lens >> List.map
 
-        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i list,'j list,'j> =
-            List.choose (Prism.get prism),
+        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<'i list,'j> =
+            List.choose (Prism.get prism) >> Seq.ofList,
             Prism.map prism >> List.map
 
     [<RequireQualifiedAccess>]
@@ -265,23 +273,23 @@ module Optics =
         let list_ : Isomorphism<Map<'k,'v>, ('k * 'v) list> =
             Map.toList, Map.ofList
 
-        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<Map<'k,'i>,Map<'k,'j>,'j> =
-            Map.map (fun _ -> Lens.get lens),
+        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<Map<'k,'i>,'j> =
+            Map.toArray >> Array.map (fun (_,v) -> Lens.get lens v) >> Seq.ofArray,
             fun f -> Map.map (fun _ -> Lens.map lens f)
 
-        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<Map<'k,'i>,Map<'k,'j>,'j> =
-            Map.filter (fun _ -> Prism.get prism >> Option.isSome) >> Map.map (fun _ -> Prism.get prism >> Option.get),
+        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<Map<'k,'i>,'j> =
+            Map.toArray >> Seq.ofArray >> Seq.choose (fun (_,v) -> Prism.get prism v),
             fun f -> Map.map (fun _ -> Prism.map prism f)
 
     [<RequireQualifiedAccess>]
     module Set =
 
-        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<Set<'i>,Set<'j>,'j> =
-            Set.map (Lens.get lens),
+        let traverseWithLens (lens : Lens<'i, 'j>) : Traversal'<Set<'i>,'j> =
+            Set.toArray >> Array.map (Lens.get lens) >> Seq.ofArray,
             Lens.map lens >> Set.map
 
-        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<Set<'i>,Set<'j>,'j> =
-            Set.filter (Prism.get prism >> Option.isSome) >> Set.map (Prism.get prism >> Option.get),
+        let traverseWithPrism (prism : Prism<'i, 'j>) : Traversal'<Set<'i>,'j> =
+            Set.toArray >> Seq.ofArray >> Seq.choose (Prism.get prism),
             Prism.map prism >> Set.map
 
     [<RequireQualifiedAccess>]
