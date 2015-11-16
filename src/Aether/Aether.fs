@@ -20,6 +20,7 @@ type Traversal<'s,'a> = Traversal<'s,'s,'a,'a>
 type Review<'s,'a> = ('a -> 's)
 
 type Optic<'s,'t,'g,'a,'b> = Getter<'s,'g> * Traversal<'s,'t,'a,'b>
+type Optic<'s,'g,'a> = Optic<'s,'s,'g,'a,'a>
 
 /// Lens from s -> a
 type Lens<'s,'t,'a,'b> = Getter<'s,'a> * Traversal<'s,'t,'a,'b>
@@ -98,12 +99,12 @@ module Optics =
     let inline map ((_, setter): Optic<'s,'t,'g,'a,'b>) : Setter<'s,'t,'a,'b> =
         Setter.over setter
 
-    let compose ((g1,s1) : Optic<'s,'t,'g,'a,'b>) ((g2,s2) : Optic<'x,'y,'f,'s,'t>) (glue : Traversal<_,_,_,_>) =
-        g2 >> glue g1,
-        s2 << s1
+    let compose (glue : Traversal<_,_,_,_>) ((g1,s1) : Optic<'s,'t,'f,'x,'y>) ((g2,s2) : Optic<'x,'y,'g,'a,'b>) =
+        g1 >> glue g2,
+        s1 << s2
 
-    let inline composeOptic (o1: Optic<'s,'t,#seq<'a>,'a,'b>) (o2: Optic<'x,'y,#seq<'s>,'s,'t>) : Multilens<'x,'y,'a,'b> =
-        compose o1 o2 Seq.collect
+    let inline composeOptic (o1: Optic<'s,'t,#seq<'x>,'x,'y>) (o2: Optic<'x,'y,#seq<'a>,'a,'b>) : Optic<'s,'t,seq<'a>,'a,'b> =
+        compose Seq.collect o1 o2
 
 /// Functions for using lenses to get, set, and modify values on
 /// product-types, such as tuples and records.
@@ -113,14 +114,14 @@ module Lens =
     let inline ofGetSet (getter : Getter<'s,'a>) (setter : Setter'<'s,'t,'b>) : Lens<'s,'t,'a,'b> =
         getter, fun f s -> setter (f (getter s)) s
 
-    let inline composeLens (l1: Lens<'s,'t,'a,'b>) (l2: Lens<'x,'y,'s,'t>) : Lens<'x,'y,'a,'b> =
-        Optics.compose l1 l2 id
+    let inline composeLens (o: Lens<'s,'t,'x,'y>) (c: Lens<'x,'y,'a,'b>) : Lens<'s,'t,'a,'b> =
+        Optics.compose id o c
 
-    let inline composePrism (l: Lens<'s,'t,'a,'b>) (p: Prism<'x,'y,'s,'t>) : Prism<'x,'y,'a,'b> =
-        Optics.compose l p Option.map
+    let inline composePrism (o: Lens<'s,'t,'x,'y>) (c: Prism<'x,'y,'a,'b>) : Prism<'s,'t,'a,'b> =
+        Optics.compose id o c
 
-    let inline composeOptic (l: Lens<'s,'t,'a,'b>) (o: Optic<'x,'y,#seq<'s>,'s,'t>) : Multilens<'x,'y,'a,'b> =
-        Optics.compose l o Seq.collect
+    let inline composeOptic (o: Lens<'s,'t,'x,'y>) (c: Optic<'x,'y,'g,'a,'b>) : Optic<'s,'t,'g,'a,'b> =
+        Optics.compose id o c
 
     /// Converts an isomorphism into a lens
     let inline ofIsomorphism ((t, f): Isomorphism<'s,'a>) : Lens<'s,'a> =
@@ -141,25 +142,41 @@ module Prism =
     let inline ofGetSet g s =
         ofGetSetMap g s id
 
-    let inline composeLens (p: Prism<'s,'t,'a,'b>) (l: Lens<'x,'y,'s,'t>) : Prism<'x,'y,'a,'b> =
-        Optics.compose p l id
+    let inline ofReviewTryView (review : Review<'t,'b>) (getter : Getter<'s,Choice<'a,'t>>) : Prism<'s,'t,'a,'b> =
+        (getter >> function | Choice1Of2 a -> Some a | _ -> None),
+        (fun f -> getter >> function | Choice1Of2 a -> (f >> review) a | Choice2Of2 t -> t)
 
-    let inline composePrism (p1: Prism<'s,'t,'a,'b>) (p2: Prism<'x,'y,'s,'t>) : Prism<'x,'y,'a,'b> =
-        Optics.compose p1 p2 Option.bind
+    let inline composeLens (o: Prism<'s,'t,'x,'y>) (c: Lens<'x,'y,'a,'b>) : Prism<'s,'t,'a,'b> =
+        Optics.compose Option.map o c
 
-    let inline composeOptic (p: Prism<'s,'t,'a,'b>) (o: Optic<'x,'y,#seq<'s>,'s,'t>) : Multilens<'x,'y,'a,'b> =
-        Optics.compose p o (fun f -> Seq.collect (f >> function | Some v -> Seq.singleton v | None -> Seq.empty))
+    let inline composePrism (o: Prism<'s,'t,'x,'y>) (c: Prism<'x,'y,'a,'b>) : Prism<'s,'t,'a,'b> =
+        Optics.compose Option.bind o c
+
+    let inline composeOptic (o: Prism<'s,'t,'x,'y>) (c: Optic<'x,'y,'g,'a,'b>) def : Optic<'s,'t,'g,'a,'b> =
+        Optics.compose (fun f -> function | Some v -> f v | None -> def) o c
+
+    let bindSeq = function
+        | Some v -> Seq.singleton v
+        | None -> Seq.empty
+
+    let bindArray = function
+        | Some v -> [|v|]
+        | None -> [||]
+
+    let bindList = function
+        | Some v -> [v]
+        | None -> []
 
 [<RequireQualifiedAccess>]
 module Multilens =
-        let inline composeLens (l1: Multilens<'s,'t,'a,'b>) (l2: Lens<'x,'y,'s,'t>) : Multilens<'x,'y,'a,'b> =
-            Optics.compose l1 l2 id
+        let inline composeLens (o: Optic<'s,'t,#seq<'x>,'x,'y>) (c: Lens<'x,'y,'a,'b>) : Multilens<'s,'t,'a,'b> =
+            Optics.compose Seq.collect o c
 
-        let inline composePrism (l: Multilens<'s,'t,'a,'b>) (p: Prism<'x,'y,'s,'t>) : Multilens<'x,'y,'a,'b> =
-            Optics.compose l p (fun f -> function | Some v -> f v | None -> Seq.empty)
+        let inline composePrism (o: Optic<'s,'t,#seq<'x>,'x,'y>) (c: Prism<'x,'y,'a,'b>) glue: Multilens<'s,'t,'a,'b> =
+            Optics.compose (fun f -> Seq.collect (f >> glue)) o c
 
-        let inline composeOptic (l: Multilens<'s,'t,'a,'b>) (o: Optic<'x,'y,#seq<'s>,'s,'t>) : Multilens<'x,'y,'a,'b> =
-            Optics.compose l o Seq.collect
+        let inline composeOptic (o: Optic<'s,'t,#seq<'x>,'x,'y>) (c: Optic<'x,'y,#seq<'a>,'a,'b>) : Multilens<'s,'t,'a,'b> =
+            Optics.compose Seq.collect o c
 
 /// Various optics implemented for common types such as tuples,
 /// lists and maps, along with an id_ lens.
@@ -193,8 +210,8 @@ module Core =
         type Multilens<'s,'t,'a,'b> = Getter<'s,'a list> * Traversal<'s,'t,'a,'b>
         type Multilens<'s,'a> = Multilens<'s,'s,'a,'a>
 
-        let each_ : Multilens<'i list,'i> =
-            id, List.map
+        let each_ : Optic<'i list,'i list,'i seq,'i,'i> =
+            List.toSeq, List.map
 
         /// Prism to the head of a list
         let head_ : Prism<'v list, 'v> =
@@ -208,14 +225,8 @@ module Core =
 
         /// Prism to an indexed element in a list
         let rec pos_ (i: int) : Prism<'v list, 'v> =
-            match i with
-            | 0 -> head_
-            | _ -> Prism.composePrism (pos_ (i - 1)) tail_
-
-        /// Prism to an indexed element in a list
-        let posOld_ (i: int) : Prism<'v list, 'v> =
-            (function | l when List.length l > i -> Some l.[i] | _ -> None),
-            (fun f l -> List.mapi (fun i' x -> if i = i' then f x else x) l)
+            (fun l -> if i < List.length l then Some l.[i] else None),
+            (fun f -> List.mapi (fun j -> if i = j then f else id))
 
         /// Isomorphism to an array
         let array_ : Isomorphism<'v list, 'v[]> =
@@ -269,8 +280,8 @@ module Core =
         let snd_ : Lens<('l * 'r),'r> =
             snd, (fun f (l,r) -> l, f r)
 
-        let both_ : Multilens<('a * 'a), 'a> =
-            (fun (f,s) -> [|f;s|] |> Array.toSeq),
+        let both_ : Optic<('a * 'a),('a * 'a),'a[],'a,'a> =
+            (fun (f,s) -> [|f;s|]),
             (fun f a -> f (fst a), f (snd a))
 
     [<RequireQualifiedAccess>]
@@ -298,35 +309,62 @@ module Core =
 module Operators =
 
     /// Compose a lens with a lens, giving a lens
-    let inline (>-->) l1 l2 =
-        Lens.composeLens l1 l2
+    let inline (^>-->) o c =
+        Lens.composeLens o c
+
+    let inline (<--<) c o =
+        Lens.composeLens o c
 
     /// Compose a lens and a prism, giving a prism
-    let inline (>-?>) l p =
-        Lens.composePrism l p
+    let inline (^>-?>) o c =
+        Lens.composePrism o c
+
+    let inline (<?-<) c o =
+        Lens.composePrism o c
 
     /// Compose a prism and a lens, giving a prism
-    let inline (>?->) p l =
-        Prism.composeLens p l
+    let inline (^>?->) o c =
+        Prism.composeLens o c
+
+    let inline (<-?<) c o =
+        Prism.composeLens o c
 
     /// Compose a prism with a prism, giving a prism
-    let inline (>??>) p1 p2 =
-        Prism.composePrism p1 p2
+    let inline (^>??>) o c =
+        Prism.composePrism o c
 
-    let inline (>%%>) o1 o2 =
-        Multilens.composeOptic o1 o2
+    let inline (<??<) c o =
+        Prism.composePrism o c
 
-    let inline (>-%>) l o =
-        Lens.composeOptic l o
+    let inline (^>%%>) o c =
+        Optics.composeOptic o c
 
-    let inline (>?%>) p o =
-        Prism.composeOptic p o
+    let inline (<%%<) c o =
+        Optics.composeOptic o c
 
-    let inline (>%->) m l =
-        Multilens.composeLens m l
+    let inline (^>-%>) o c =
+        Lens.composeOptic o c
 
-    let inline (>%?>) m p =
-        Multilens.composePrism m p
+    let inline (<%-<) c o =
+        Lens.composeOptic o c
+
+    let inline (^>?%>) o (c,def) =
+        Prism.composeOptic o c def
+
+    let inline (<%?<) (c,def) o =
+        Prism.composeOptic o c def
+
+    let inline (^>%->) o c =
+        Multilens.composeLens o c
+
+    let inline (<-%<) c o =
+        Multilens.composeLens o c
+
+    let inline (^>%?>) (o,glue) c =
+        Multilens.composePrism o c glue
+
+    let inline (<?%<) c (o,glue) =
+        Multilens.composePrism o c glue
 (*
     /// Compose a lens with an isomorphism, giving a total lens
     let inline (<-->) l i =
@@ -352,32 +390,13 @@ module Operators =
        symbol soup. *)
 
     /// Get a value using a lens
-    let inline (^.) (a: 'a) (l: Lens<'a,'b>) : 'b =
-        Optics.get l a
+    let inline (^.) (s: 's) (o: Optic<'s,'t,'g,'a,'b>) : 'g =
+        Optics.get o s
 
     /// Set a value using a lens
-    let inline (^=) (b: 'b) (l: Lens<'a,'b>) : 'a -> 'a =
-        Optics.set l b
+    let inline (^~) (s: 's) (o: Optic<'s,'t,'g,'a,'b>) (b: 'b) : 't =
+        Optics.set o b s
 
     /// Modify a value using a lens
-    let inline (^%=) (f: 'b -> 'b) (l: Lens<'a,'b>) : 'a -> 'a =
-        Optics.map l f
-
-(*
-let cho i (v : int) = match i % 2 with | 0 -> Choice1Of2 v | _ -> string v |> Choice2Of2
-
-let s2 m = Seq.initInfinite (fun i -> (((cho i i),(cho (i + 1) (i * m))), (string i,string (i * m))))
-
-let s = s2 2
-
-open Operators
-
-// Need to reverse composition functions
-
-let i = Optics.get (Multilens.composeOptic (Multilens.composeLens (Prism.composeOptic Choice.choice1Of2_ Tuple.both_) Tuple.fst_) Seq.each_) (s2 2);;
-
-let i = Optics.map (Choice.choice1Of2_ >?%> Tuple.both_ >%-> Tuple.fst_ >%%> Seq.each_) (~-) (s2 2);;
-
-let j = Optics.map (Tuple.both_ >%-> Tuple.snd_ >%%> Seq.each_) (fun s -> "_" + s + "_") i;;
-
-*)
+    let inline (^%) (s: 's) (o: Optic<'s,'t,'g,'a,'b>) (f: 'a -> 'b) : 't =
+        Optics.map o f s
