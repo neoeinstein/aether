@@ -490,6 +490,18 @@ module Optics =
                 function | Some _ -> Some v
                          | None -> None)
 
+        /// Unsafe lens to the value contained within an option.
+        /// This function will throw an exception if the option is `None`.
+        let unsafe_ : Lens<'v option, 'v> =
+            Option.get, fun v _ -> Some v
+
+        /// Lens to the value contained within an option. If the option is
+        /// `None`, then the provided default will be used instead. The setter
+        /// always returns the provided value wrapped in `Some`, even if the
+        /// option previously was `None`.
+        let withDefault_ def : Lens<'v option, 'v> =
+            (function | Some v -> v; | None -> def), fun v _ -> Some v
+
 (* Obsolete
 
     Backwards compatibility shims to make the 2.x-> 3.x transition

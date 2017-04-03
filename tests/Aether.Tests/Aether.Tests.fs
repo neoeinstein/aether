@@ -38,6 +38,27 @@ module ``Built-in Lenses`` =
         Lens.followsLensLaws snd_ outer inner dummy times2
 
     [<Property>]
+    let ``Option.unsafe_ follows the lens laws when Some`` (outer : int option) inner dummy =
+        (Option.isSome outer) ==>
+            Lens.followsLensLaws Option.unsafe_ outer inner dummy times2
+
+    [<Fact>]
+    let ``Option.unsafe_ throws when None`` () =
+        raises <@ Lens.get Option.unsafe_ None @>
+
+    [<Property>]
+    let ``Option.unsafe_ always wraps with Some`` (value: int) =
+        test <@ Lens.set Option.unsafe_ value None = Some value @>
+
+    [<Property>]
+    let ``Option.withDefault_ provides default value when None`` (def: int) =
+        test <@ Lens.get (Option.withDefault_ def) None = def @>
+
+    [<Property>]
+    let ``Option.withDefault_ always wraps with Some`` (def: int) (value: int) =
+        test <@ Lens.set (Option.withDefault_ def) value None = Some value @>
+
+    [<Property>]
     let ``Map.value_ follows the Lens Laws`` key (outer: Map<string,int>) inner dummy =
         Lens.followsLensLaws (Map.value_ key) outer inner dummy maybeInt
 
